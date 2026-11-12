@@ -12,6 +12,8 @@
 #   variable GAME_REFS_REPO     the private refs repo, e.g. Maddog2050/Obenseuer-GameRefs
 #   secret   NEXUSMODS_API_KEY  Nexus Mods API key (https://www.nexusmods.com/settings/api-keys)
 #   variable NEXUS_FILE_ID      file ID of the main file on the Nexus page; the Nexus upload is skipped while unset
+#   variable NEXUS_MOD_ID       global mod ID for the changelog (Files tab -> Advanced; not the 92 in the page URL);
+#                               the changelog is skipped while unset
 # and Settings -> Actions -> General -> "Allow GitHub Actions to create and approve pull requests".
 name: release-please
 
@@ -130,11 +132,11 @@ jobs:
         uses: Nexus-Mods/upload-action@v1.0.0-beta.11
         with:
           api_key: ${{ secrets.NEXUSMODS_API_KEY }}
-          mod_id: 92
+          mod_id: ${{ vars.NEXUS_MOD_ID }}
           file_id: ${{ vars.NEXUS_FILE_ID }}
           filename: ${{ env.ZIP_FILE }}
           version: ${{ env.VERSION }}
           display_name: No-Fuss Locks ${{ env.VERSION }}
-          changelog: ${{ steps.notes.outputs.body }}
+          changelog: ${{ vars.NEXUS_MOD_ID != '' && steps.notes.outputs.body || '' }}
           update_mod_version: true
           archive_existing_version: true
