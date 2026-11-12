@@ -31,8 +31,8 @@ namespace NoFussLocks.Patches
                 return true;
 
             var (title, content) = safe
-                ? ("Crack this safe?", "The safe opens without entering the combination.")
-                : ("Bypass this keypad?", "The keypad opens without entering the code.");
+                ? ("Crack this safe?", "The safe opens without the combination.")
+                : ("Bypass this keypad?", "The keypad opens without the code.");
             Keypad keypad = __instance;
             bool StillValid() => keypad != null && !keypad.noPower && !keypad.open;
             try
