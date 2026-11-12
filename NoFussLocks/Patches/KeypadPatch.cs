@@ -30,14 +30,14 @@ namespace NoFussLocks.Patches
                 || (DialogueController.instance != null && DialogueController.instance.DialogueActive))
                 return true;
 
-            var (title, content, confirm) = safe
-                ? ("Crack this safe?", "The safe opens without entering the combination.", "Crack safe")
-                : ("Bypass this keypad?", "The keypad opens without entering the code.", "Bypass keypad");
+            var (title, content) = safe
+                ? ("Crack this safe?", "The safe opens without the combination.")
+                : ("Bypass this keypad?", "The keypad opens without the code.");
             Keypad keypad = __instance;
             bool StillValid() => keypad != null && !keypad.noPower && !keypad.open;
             try
             {
-                PromptUI.OpenSimple(StillValid, title, content, confirm, () =>
+                PromptUI.OpenSimple(StillValid, title, content, () =>
                 {
                     // Checked again: Yes runs one frame after the prompt closes (after controls come back).
                     if (StillValid())

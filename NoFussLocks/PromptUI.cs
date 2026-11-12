@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace NoFussLocks
@@ -30,7 +31,6 @@ namespace NoFussLocks
         private static float lastWitnessCheck;
         private static string title = "";
         private static string content = "";
-        private static string confirmText = "";
         private static Action simpleYes; // set for OpenSimple prompts; null for lockpicking
         private static Func<bool> simpleValid; // OpenSimple: is the keypad/safe still there, powered and closed?
         private static Action afterRestore; // the Yes action, run right after controls/menu are restored (RestoreControls)
@@ -43,11 +43,16 @@ namespace NoFussLocks
         private static Click pendingClick; // IMGUI button clicks, acted on in LateUpdate (see OnGUI)
         private static int restoreFrame = -1; // frame on which Close ran; controls/menu come back on the next frame
 
+        // Drawing. Sizes are in pixels at 1080p and scaled with the screen height (styles rebuilt when it changes).
         private static GUIStyle titleStyle;
         private static GUIStyle buttonStyle;
         private static GUIStyle hintStyle;
         private static GUIStyle contentStyle;
-        private static Texture2D barTexture;
+        private static float styleScale;
+        private static Texture2D white; // 1x1, tinted with GUI.color for every filled rectangle
+        private static Font gameFont;
+        private static bool gameFontSearched;
+        private static bool fontMissingLogged;
 
         internal static bool IsOpen => state != State.Closed;
 
@@ -63,7 +68,7 @@ namespace NoFussLocks
                 ? PlayerLockpicking.ConstructLockpickMessage(lockDifficulty, lockToLockpick).Trim('(', ')') + "."
                 : "";
             if (!Plugin.BypassWitnesses.Value)
-                text += (text.Length > 0 ? " " : "") + "Anyone who sees you will report a burglary.";
+                text += (text.Length > 0 ? "\n" : "") + "Anyone who sees you will report a burglary.";
 
             // Assigned only once nothing above can throw, so a failed open leaves no stale lock behind.
             mode = Mode.Lock;
@@ -72,7 +77,7 @@ namespace NoFussLocks
             difficulty = lockDifficulty;
             simpleYes = null;
             simpleValid = null;
-            Show("Pick this lock?", text, "Pick lock");
+            Show("Pick this lock?", text);
         }
 
         internal static bool IsActiveLock(Lock l) => l != null && activeLock == l; // activeLock is cleared on Close
@@ -84,7 +89,7 @@ namespace NoFussLocks
 
         // stillValid: whether Yes still makes sense (keypad not destroyed, powered, not opened meanwhile); checked every
         // frame, and the prompt closes as soon as it returns false.
-        internal static void OpenSimple(Func<bool> stillValid, string promptTitle, string promptContent, string promptConfirm, Action onYes)
+        internal static void OpenSimple(Func<bool> stillValid, string promptTitle, string promptContent, Action onYes)
         {
             if (IsOpen)
                 return;
@@ -95,19 +100,23 @@ namespace NoFussLocks
             activeLock = null;
             simpleYes = onYes;
             simpleValid = stillValid;
-            Show(promptTitle, promptContent, promptConfirm);
+            Show(promptTitle, promptContent);
         }
 
         // The prompt only counts as open once the menu and controls are disabled. If disabling throws, whatever was
         // disabled is restored, the fields are cleared and the exception goes to the patch, which leaves the use to
         // vanilla or ends the lock attempt.
-        private static void Show(string promptTitle, string promptContent, string promptConfirm)
+        private static void Show(string promptTitle, string promptContent)
         {
             title = promptTitle;
             content = promptContent;
-            confirmText = promptConfirm;
             pendingClick = Click.None;
             hint = null; // key bindings may have changed since the last prompt
+            if (gameFont == null) // not loaded yet last time, or unloaded since (Unity null): look again, rebuild styles
+            {
+                gameFontSearched = false;
+                titleStyle = null;
+            }
 
             try
             {
@@ -139,6 +148,77 @@ namespace NoFussLocks
             }
 
             SetState(State.Asking);
+            blurErrorLogged = false;
+            EnsureBlur();
+        }
+
+        // The game's menu blur: the Beautify "blur" flag on the cameras EffectsController keeps (what its EnableBlur
+        // and DisableBlur set, for the game menu, pause menu and start selections). On while the prompt is up, picking
+        // included. The flag is set per camera here rather than through EnableBlur/DisableBlur, so a stale entry can't
+        // stop the rest, and only cameras this prompt blurred are cleared again.
+        private static readonly List<BeautifyEffect.Beautify> blurredByPrompt = new List<BeautifyEffect.Beautify>();
+        private static bool blurErrorLogged;
+
+        // Blurs any camera that isn't blurred yet. Called on open and every frame while open, so a DisableBlur from
+        // elsewhere during the prompt (e.g. a menu closing) doesn't leave the prompt unblurred.
+        private static void EnsureBlur()
+        {
+            var fx = EffectsController.instance;
+            if (fx == null)
+                return;
+            foreach (var entry in fx.beautifyList)
+            {
+                try
+                {
+                    var b = entry?.beautify;
+                    if (b == null || b.blur)
+                        continue;
+                    b.blur = true;
+                    blurredByPrompt.Add(b);
+                }
+                catch (Exception e)
+                {
+                    if (!blurErrorLogged)
+                        Plugin.Log.LogWarning($"Background blur failed: {e}");
+                    blurErrorLogged = true;
+                }
+            }
+        }
+
+        // Clears the blur this prompt added, unless something that needs it has opened meanwhile (the pause or death
+        // menu, the game menu, the start selections), which would otherwise lose its background blur.
+        private static void ReleaseBlur()
+        {
+            if (blurredByPrompt.Count == 0)
+                return;
+            bool neededElsewhere = false;
+            try
+            {
+                neededElsewhere = (GameController.instance != null && GameController.instance.GameIsPaused)
+                    || (GameUIController.instance != null && GameUIController.instance.IsMenuVisible)
+                    || (StartSelectionsUI.instance != null && StartSelectionsUI.instance.menu != null
+                        && StartSelectionsUI.instance.menu.activeSelf);
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning($"Blur owner check failed: {e}");
+            }
+            if (!neededElsewhere)
+            {
+                foreach (var b in blurredByPrompt)
+                {
+                    try
+                    {
+                        if (b != null)
+                            b.blur = false;
+                    }
+                    catch (Exception e)
+                    {
+                        Plugin.Log.LogWarning($"Removing the background blur failed: {e}");
+                    }
+                }
+            }
+            blurredByPrompt.Clear();
         }
 
         private static void SetState(State s)
@@ -155,6 +235,7 @@ namespace NoFussLocks
             if (!IsOpen)
                 return false;
             SetState(State.Closed);
+            ReleaseBlur();
             callback = null;
             activeLock = null;
             simpleYes = null;
@@ -360,6 +441,8 @@ namespace NoFussLocks
         private static State hintState;
         private static bool hintController;
 
+        // Same format as the game's key hints (InventoryNavigationHandler.KeyCodeInfoToString, e.g. the shop's
+        // "F)BUY/SELL   E/Q)CATEGORY   Tab)EXIT"): key, ")", the action in capitals, entries three spaces apart.
         private static string HintText()
         {
             bool controller = UsingController();
@@ -367,15 +450,38 @@ namespace NoFussLocks
             {
                 hintState = state;
                 hintController = controller;
-                var input = InputManager.instance;
-                if (state == State.Picking)
-                    hint = controller ? $"[{input.GetKeyCodeDisplayText("Menu")}] Stop" : "[N / Esc] Stop";
-                else
-                    hint = controller
-                        ? $"[{input.GetKeyCodeDisplayText("Move Item")}] Yes     [{input.GetKeyCodeDisplayText("Menu")}] No"
-                        : "[Y / Enter] Yes     [N / Esc] No";
+                string yes = controller ? BindingText("Move Item") : "Y/Enter";
+                string no = controller ? BindingText("Menu", "Pause Menu") : "N/ESC";
+                hint = state == State.Picking
+                    ? HintEntry(no, "STOP")
+                    : JoinHints(HintEntry(yes, "YES"), HintEntry(no, "NO"));
             }
             return hint;
+        }
+
+        private static string HintEntry(string keys, string action)
+        {
+            return string.IsNullOrEmpty(keys) ? "" : keys + ")" + action;
+        }
+
+        private static string JoinHints(string a, string b)
+        {
+            return a.Length == 0 ? b : b.Length == 0 ? a : a + "   " + b;
+        }
+
+        // The player's current bindings for these actions as the game displays them ("A", "Menu", ...), joined
+        // with "/" and without repeats; empty when none is bound.
+        private static string BindingText(params string[] actions)
+        {
+            var input = InputManager.instance;
+            var shown = new List<KeyCode>();
+            foreach (var action in actions)
+            {
+                var code = input.GetKeyCode(action);
+                if (code != KeyCode.None && !shown.Contains(code))
+                    shown.Add(code);
+            }
+            return string.Join("/", shown.ConvertAll(input.GetKeyCodeDisplayText));
         }
 
         // Y/N/Enter/Esc are safe on keyboard: the game's own key handling is disabled while the prompt is up.
@@ -393,8 +499,11 @@ namespace NoFussLocks
         {
             if (restoreFrame >= 0 && Time.frameCount > restoreFrame)
                 RestoreControls();
+            if (state == State.Closed)
+                return;
+            EnsureBlur();
             // Skip the frame the state changed on, so the key press that caused it isn't read again.
-            if (state == State.Closed || Time.frameCount <= stateFrame)
+            if (Time.frameCount <= stateFrame)
                 return;
 
             var click = pendingClick;
@@ -424,67 +533,209 @@ namespace NoFussLocks
                 Finish();
         }
 
+        // Colours of the prompt-game design (media/design-notes.md), taken from the game's menus: near-black panels in
+        // charcoal frames, cream text, and the tab colours for the buttons (selected tab #825112, other tabs #53380d).
+        private static readonly Color FrameFill = Hex(0x090b0a), FrameLine = Hex(0x383b34);
+        private static readonly Color PanelFill = Hex(0x121313), PanelLine = Hex(0x53564c);
+        private static readonly Color Accent = Hex(0x825112), Secondary = Hex(0x53380d);
+        private static readonly Color AccentInset = new Color(0.85f, 0.80f, 0.63f, 0.27f), SecondaryInset = Hex(0x6b4a16);
+        private static readonly Color ButtonLine = Hex(0x68675f);
+        // Muted is lighter than the mock-ups' #aaa99c: Unity draws Erika Ormig thinner than the SVG renderer, and the
+        // darker grey faded into the panel in-game.
+        private static readonly Color Ink = Hex(0xe2ded0), Muted = Hex(0xc8c5b8);
+        private static readonly Color BarFill = Hex(0x070d0b), BarLine = Hex(0x575e4b);
+
+        private static Color Hex(int rgb) => new Color(((rgb >> 16) & 0xff) / 255f, ((rgb >> 8) & 0xff) / 255f, (rgb & 0xff) / 255f);
+
+        // The game's UI font. It ships inside the game's assets (used by its TextMeshPro text), so it is borrowed at
+        // runtime, never bundled. Searched for once per prompt until found (Show resets the search while it is missing
+        // or has been unloaded); without it the prompt uses Unity's default font.
+        private static Font GameFont()
+        {
+            if (!gameFontSearched)
+            {
+                gameFontSearched = true;
+                foreach (var f in Resources.FindObjectsOfTypeAll<Font>())
+                {
+                    if (f != null && f.name.IndexOf("Erika", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        gameFont = f;
+                        break;
+                    }
+                }
+                if (gameFont == null && !fontMissingLogged)
+                {
+                    fontMissingLogged = true;
+                    Plugin.Log.LogInfo("The game's Erika Ormig font wasn't found; the prompt uses the default font.");
+                }
+            }
+            return gameFont;
+        }
+
+        private static GUIStyle Style(float size, Color color, TextAnchor anchor, float scale)
+        {
+            var style = new GUIStyle(GUI.skin.label)
+            {
+                font = GameFont(),
+                fontSize = Mathf.Max(8, Mathf.RoundToInt(size * scale)),
+                alignment = anchor,
+                wordWrap = false,
+                clipping = TextClipping.Clip,
+                padding = new RectOffset(0, 0, 0, 0),
+                margin = new RectOffset(0, 0, 0, 0),
+            };
+            style.normal.textColor = color;
+            return style;
+        }
+
+        private static void Fill(Rect r, Color c)
+        {
+            var old = GUI.color;
+            GUI.color = c;
+            GUI.DrawTexture(r, white);
+            GUI.color = old;
+        }
+
+        // A 1 px (scaled) outline inside r.
+        private static void Outline(Rect r, Color c, float t)
+        {
+            Fill(new Rect(r.x, r.y, r.width, t), c);
+            Fill(new Rect(r.x, r.yMax - t, r.width, t), c);
+            Fill(new Rect(r.x, r.y, t, r.height), c);
+            Fill(new Rect(r.xMax - t, r.y, t, r.height), c);
+        }
+
+        // Draws a button and returns whether it was clicked. Lighter while the mouse is over it. px is the line width:
+        // the scale rounded to whole pixels, so lines stay sharp (they step 1 -> 2 px at 1.5x, e.g. 1620p).
+        private static bool Button(Rect r, string label, bool primary, float px)
+        {
+            bool hover = r.Contains(Event.current.mousePosition);
+            Color fill = primary ? Accent : Secondary;
+            if (hover)
+                fill = Color.Lerp(fill, Color.white, 0.12f);
+            Fill(r, fill);
+            Outline(r, ButtonLine, px);
+            Outline(new Rect(r.x + 3f * px, r.y + 3f * px, r.width - 6f * px, r.height - 6f * px), primary ? AccentInset : SecondaryInset, px);
+            GUI.Label(r, label, buttonStyle);
+            return GUI.Button(r, GUIContent.none, GUIStyle.none);
+        }
+
+        // The content, one label per line 23 px apart, as in the mock-ups (IMGUI's own line spacing is tighter).
+        // Lines are split at "\n" and wrapped at words to the panel width with the real font, so they never clip. Two
+        // lines fit above the buttons; the panel grows for more (OnGUI), so nothing is dropped. Cached until the text
+        // or the scale changes.
+        private static string wrappedFor;
+        private static float wrappedScale;
+        private static readonly List<string> wrapped = new List<string>();
+
+        private static List<string> Wrap(string text, float width, float k)
+        {
+            if (wrappedFor != text || wrappedScale != k)
+            {
+                wrappedFor = text;
+                wrappedScale = k;
+                wrapped.Clear();
+                foreach (var para in text.Split('\n'))
+                {
+                    string line = "";
+                    foreach (var word in para.Split(' '))
+                    {
+                        string next = line.Length == 0 ? word : line + " " + word;
+                        if (line.Length > 0 && contentStyle.CalcSize(new GUIContent(next)).x > width)
+                        {
+                            wrapped.Add(line);
+                            line = word;
+                        }
+                        else
+                            line = next;
+                    }
+                    wrapped.Add(line);
+                }
+            }
+            return wrapped;
+        }
+
+        private static void DrawLines(List<string> lines, float left, float top, float width, float k)
+        {
+            for (int i = 0; i < lines.Count; i++)
+                GUI.Label(new Rect(left, top + (60f + 23f * i) * k, width, 24f * k), lines[i], contentStyle);
+        }
+
         internal static void OnGUI()
         {
             if (state == State.Closed)
                 return;
 
-            if (titleStyle == null)
+            // Laid out at 1080p and scaled with the screen height; on a very narrow screen the 540 px panel (plus a
+            // margin) is fitted to the width instead.
+            float k = Mathf.Min(Screen.height / 1080f, Screen.width / 600f);
+            if (k <= 0f)
+                return;
+            if (white == null)
             {
-                titleStyle = new GUIStyle(GUI.skin.label) { fontSize = 22, alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
-                titleStyle.normal.textColor = Color.white;
-                contentStyle = new GUIStyle(GUI.skin.label) { fontSize = 14, alignment = TextAnchor.MiddleCenter, wordWrap = true };
-                contentStyle.normal.textColor = new Color(0.9f, 0.9f, 0.9f);
-                buttonStyle = new GUIStyle(GUI.skin.button) { fontSize = 18 };
-                hintStyle = new GUIStyle(GUI.skin.label) { fontSize = 13, alignment = TextAnchor.MiddleCenter };
-                hintStyle.normal.textColor = new Color(0.8f, 0.8f, 0.8f);
+                white = new Texture2D(1, 1);
+                white.SetPixel(0, 0, Color.white);
+                white.Apply();
             }
-            if (barTexture == null)
+            if (titleStyle == null || styleScale != k)
             {
-                barTexture = new Texture2D(1, 1);
-                barTexture.SetPixel(0, 0, new Color(0.85f, 0.75f, 0.35f));
-                barTexture.Apply();
+                styleScale = k;
+                titleStyle = Style(26f, Ink, TextAnchor.MiddleLeft, k);
+                contentStyle = Style(17f, Muted, TextAnchor.MiddleLeft, k);
+                buttonStyle = Style(20f, Ink, TextAnchor.MiddleCenter, k);
+                hintStyle = Style(16f, Muted, TextAnchor.MiddleCenter, k);
             }
 
-            const float w = 380f, h = 190f;
-            var rect = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
-            GUI.Box(rect, GUIContent.none);
-            GUI.Box(rect, GUIContent.none); // twice for a darker backdrop
+            float w = 540f * k;
+            float textWidth = w - 52f * k;
+            var lines = Wrap(state == State.Asking ? content : (Plugin.BypassWitnesses.Value ? "" : "Keep out of sight."), textWidth, k);
+            // Room for two content lines (and, while picking, one line plus the bar); 23 px more per extra line.
+            float extra = 23f * k * Mathf.Max(0, lines.Count - (state == State.Asking ? 2 : 1));
+            float h = 224f * k + extra;
+            float x = Mathf.Round((Screen.width - w) / 2f), y = Mathf.Round((Screen.height - h) / 2f);
+            float px = Mathf.Max(1f, Mathf.Round(k)); // line thickness
+
+            // Outer frame, panel, accent rail on the left.
+            var frame = new Rect(x - 5f * k, y - 5f * k, w + 10f * k, h + 10f * k);
+            Fill(frame, FrameFill);
+            Outline(frame, FrameLine, 2f * px);
+            var panel = new Rect(x, y, w, h);
+            Fill(panel, PanelFill);
+            Outline(panel, PanelLine, px);
+            Fill(new Rect(x, y, 4f * k, h), Accent);
+
+            float left = x + 26f * k;
+            float bw = 236f * k, bh = 40f * k, by = y + 140f * k + extra;
+            var yesRect = new Rect(left, by, bw, bh);
+            var noRect = new Rect(x + 278f * k, by, bw, bh);
 
             if (state == State.Asking)
             {
-                GUI.Label(new Rect(rect.x, rect.y + 12f, w, 32f), title, titleStyle);
-                GUI.Label(new Rect(rect.x + 15f, rect.y + 46f, w - 30f, 44f), content, contentStyle);
-
-                const float bw = 140f, bh = 40f, gap = 20f;
-                float bx = rect.x + (w - 2f * bw - gap) / 2f;
-                float by = rect.y + 100f;
+                GUI.Label(new Rect(left, y + 20f * k, textWidth, 34f * k), title, titleStyle);
+                DrawLines(lines, left, y, textWidth, k);
                 // Only record the click: the lock/keypad callbacks then run from LateUpdate, the same as for keys,
                 // not in the middle of IMGUI event processing.
-                if (GUI.Button(new Rect(bx, by, bw, bh), confirmText, buttonStyle))
+                if (Button(yesRect, "Yes", true, px))
                     pendingClick = Click.Yes;
-                else if (GUI.Button(new Rect(bx + bw + gap, by, bw, bh), "Cancel", buttonStyle))
+                else if (Button(noRect, "No", false, px))
                     pendingClick = Click.No;
-
-                GUI.Label(new Rect(rect.x, rect.y + h - 34f, w, 24f), HintText(), hintStyle);
             }
             else
             {
-                GUI.Label(new Rect(rect.x, rect.y + 12f, w, 32f), "Picking the lock...", titleStyle);
+                GUI.Label(new Rect(left, y + 20f * k, textWidth, 34f * k), "Picking the lock...", titleStyle);
+                DrawLines(lines, left, y, textWidth, k);
 
                 float progress = pickDuration > 0f ? Mathf.Clamp01((Time.time - pickStart) / pickDuration) : 1f;
-                var bar = new Rect(rect.x + 30f, rect.y + 58f, w - 60f, 20f);
-                GUI.Box(bar, GUIContent.none);
-                GUI.DrawTexture(new Rect(bar.x + 2f, bar.y + 2f, (bar.width - 4f) * progress, bar.height - 4f), barTexture);
+                var bar = new Rect(left, y + 88f * k + extra, textWidth, 14f * k);
+                Fill(bar, BarFill);
+                Outline(bar, BarLine, px);
+                Fill(new Rect(bar.x + 3f * k, bar.y + 3f * k, (bar.width - 6f * k) * progress, bar.height - 6f * k), Accent);
 
-                // Where the Cancel button was, not where "Pick lock" was, so a double click on "Pick lock" can't hit Stop.
-                const float bw = 140f, bh = 40f, gap = 20f;
-                float bx = rect.x + (w - 2f * bw - gap) / 2f + bw + gap;
-                if (GUI.Button(new Rect(bx, rect.y + 100f, bw, bh), "Stop", buttonStyle))
+                // Where No was, not where Yes was, so a double click on Yes can't hit Stop.
+                if (Button(noRect, "Stop", false, px))
                     pendingClick = Click.No;
-
-                GUI.Label(new Rect(rect.x, rect.y + h - 34f, w, 24f), HintText(), hintStyle);
             }
+            GUI.Label(new Rect(x, y + h - 32f * k, w, 24f * k), HintText(), hintStyle);
         }
 
         internal static void Dispose()
@@ -492,10 +743,13 @@ namespace NoFussLocks
             Cancel();
             afterRestore = null; // unloading/quitting: don't run a pending Yes into objects being destroyed
             RestoreControls();
-            if (barTexture != null)
-                UnityEngine.Object.Destroy(barTexture);
-            barTexture = null;
+            if (white != null)
+                UnityEngine.Object.Destroy(white);
+            white = null;
             titleStyle = contentStyle = buttonStyle = hintStyle = null;
+            wrappedFor = null;
+            gameFont = null; // borrowed from the game, never destroyed here
+            gameFontSearched = false;
         }
     }
 }
