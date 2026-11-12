@@ -34,7 +34,7 @@ jobs:
       version: ${{ steps.release.outputs.version }}
     steps:
       - id: release
-        uses: googleapis/release-please-action@v4
+        uses: googleapis/release-please-action@v5
 
   build:
     needs: release-please
@@ -45,18 +45,22 @@ jobs:
       VERSION: ${{ needs.release-please.outputs.version }}
       ZIP: NoFussLocks_${{ needs.release-please.outputs.version }}.zip
     steps:
-      - uses: actions/checkout@v4
+      # persist-credentials: false on both checkouts: no later step needs Git access (gh uses GH_TOKEN), so the
+      # tokens are used for the clone only and not left where the build or third-party actions could read them.
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
 
       # Stripped game/Unity dlls (names and signatures only) and BepInEx; never copied into the build output or zip.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: ${{ vars.GAME_REFS_REPO }}
           token: ${{ secrets.GAME_REFS_TOKEN }}
           path: game-refs
+          persist-credentials: false
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8.0.x
 
