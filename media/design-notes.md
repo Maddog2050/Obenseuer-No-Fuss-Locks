@@ -1,7 +1,7 @@
 # No-Fuss Locks — design notes
 
-Artwork for the Nexus Mods page and mock-ups of the in-game prompt. Everything here is original SVG drawn by the
-build scripts; no game art, screenshots or logos are included.
+Artwork for the Nexus Mods page and mock-ups of the in-game prompt. The artwork is original SVG drawn by the build
+scripts, with no game art or logos; the only game images are the in-game screenshots in `screenshots/`.
 
 ## Files
 
@@ -33,17 +33,19 @@ GAME_FONT_DIR=/path/to/font-folder python3 media/build-prompts.py
   from it). It is only used locally while rendering: it is not committed, not installed system-wide and not embedded
   in the SVGs. Its metadata says "Beta version, for evaluation purpose only", so don't redistribute it. The font
   draws `[` and `]` almost exactly like `(` and `)`, so bracketed text such as `[Y]` reads as "(Y)".
-- **Fira Sans** / **Fira Sans Condensed** (SIL OFL 1.1): banner title and strap line.
+- **Fira Sans Condensed** (SIL OFL 1.1): banner title and strap line.
 - **Liberation Mono** (SIL OFL 1.1) and **DejaVu Sans Mono** (DejaVu licence): small banner labels.
 
 ## Banner
 
 Dark green-grey industrial wall panels with seams, rivets, faint rain and wear, and a faded safe dial in the lower
-left. On the left: "FOR OBENSEUER", the title **No-Fuss Locks**, the strap line "One click. No minigame." and
-"LOCKS / SAFES / KEYPADS". On the right: a large open padlock (whole shackle, including the lifted free end, kept
-clear of the cards) partly behind a fan of three prompt cards, "Crack this safe?", "Bypass this keypad?" and
-"Pick this lock?" in front. The cards use the `prompt-game` design, scaled to 86 % and slightly rotated.
-Text is kept clear of the outer ~40 px, which Nexus may crop.
+left. On the left: an ochre dash and "FOR OBENSEUER", the title **No-Fuss Locks**, the strap line "One click. No
+minigame." on one line ("One click." bold, in the title ochre `#d4ad5c`) and "LOCKS / SAFES / KEYPADS". On the right:
+a large open padlock (whole shackle, including the lifted free end, kept clear of the cards) partly behind a fan of
+three prompt cards, "Crack this safe?", "Bypass this keypad?" and "Pick this lock?" in front. The cards use the
+`prompt-game` design, all three the same size, slightly rotated, with the fan scaled to 86 %. Only the titles of the
+two back cards show, so the keypad card is drawn without its description line, which would otherwise peek out under
+its title. Text is kept clear of the outer ~40 px, which Nexus may crop.
 
 ## In-game prompt
 
@@ -66,8 +68,10 @@ The prompt design (a mix of earlier "inset charcoal" and "corner toast" mock-ups
 | Button border | `#68675f`, plus a thin inset line 3 px inside |
 
 Layout: title, two content lines, Yes and No side by side (Stop takes No's place while picking, with a progress bar
-in the accent colour under the content), and the key hint centred at the bottom. The hint follows the game's own key hints (e.g. `F)BUY/SELL  E/Q)CATEGORY
-Tab)EXIT` in the shop): `Y/Enter)YES   N/ESC)NO` (the game's format: key, `)`, the action in capitals with no space, `ESC` as the game writes it, and three spaces between entries), and `N/ESC)STOP` while picking.
+in the accent colour under the content), and the key hint centred at the bottom. The hint follows the game's own
+key hints (e.g. `F)BUY/SELL   E/Q)CATEGORY   Tab)EXIT` in the shop): `Y/Enter)YES   N/ESC)NO`, and `N/ESC)STOP`
+while picking. That is the game's format: the key, `)`, the action in capitals with no space, `ESC` as the game
+writes it, and three spaces between entries.
 
 Checked in-game at 1080p: Unity draws Erika Ormig thinner than librsvg, so an earlier, darker grey (`#aaa99c`, 15–16
 px) faded into the panel; the values above are the readable in-game ones, used by the mod and the mock-ups alike. The
