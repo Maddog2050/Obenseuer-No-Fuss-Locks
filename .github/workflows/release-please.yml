@@ -18,6 +18,8 @@ on:
   push:
     branches:
       - main
+  # Run it by hand (Actions -> release-please -> Run workflow), e.g. to recreate a closed release PR.
+  workflow_dispatch:
 
 permissions:
   contents: write
