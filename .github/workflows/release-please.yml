@@ -5,6 +5,7 @@
 #    the GitHub release.
 # 2. build: when a release was just created, builds the mod against the stripped game references from the private
 #    refs repo, attaches NoFussLocks_<version>.zip to the GitHub release and uploads it to Nexus Mods.
+#    To redo this for an existing release (e.g. after a failed build), run the workflow by hand with its tag.
 #
 # Repository settings this needs (Settings -> Secrets and variables -> Actions):
 #   secret   GAME_REFS_TOKEN    read-only token for the private refs repo (fine-grained PAT, Contents: read)
@@ -20,6 +21,11 @@ on:
       - main
   # Run it by hand (Actions -> release-please -> Run workflow), e.g. to recreate a closed release PR.
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Build and upload an existing release instead, e.g. v0.1.0 (empty = run release-please)
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -29,21 +35,42 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-      version: ${{ steps.release.outputs.version }}
+      build: ${{ steps.target.outputs.build }}
+      tag_name: ${{ steps.target.outputs.tag_name }}
+      version: ${{ steps.target.outputs.version }}
     steps:
       - id: release
+        if: inputs.tag == ''
         uses: googleapis/release-please-action@v5
+
+      # Which release to build: the tag given by hand, else the release release-please just created (if any).
+      - id: target
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          CREATED: ${{ steps.release.outputs.release_created }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            if [[ ! $INPUT_TAG =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+              echo "::error::tag must look like v1.2.3, got '$INPUT_TAG'"
+              exit 1
+            fi
+            TAG=$INPUT_TAG VERSION=${BASH_REMATCH[1]} CREATED=true
+          fi
+          if [ "$CREATED" = true ]; then
+            { echo build=true; echo "tag_name=$TAG"; echo "version=$VERSION"; } >> "$GITHUB_OUTPUT"
+          fi
 
   build:
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    if: needs.release-please.outputs.build == 'true'
     runs-on: ubuntu-latest
     env:
       TAG: ${{ needs.release-please.outputs.tag_name }}
       VERSION: ${{ needs.release-please.outputs.version }}
-      ZIP: NoFussLocks_${{ needs.release-please.outputs.version }}.zip
+      # Not called ZIP: Info-ZIP's zip reads $ZIP as default arguments, which turned the file name into the archive.
+      ZIP_FILE: NoFussLocks_${{ needs.release-please.outputs.version }}.zip
     steps:
       # persist-credentials: false on both checkouts: no later step needs Git access (gh uses GH_TOKEN), so the
       # tokens are used for the clone only and not left where the build or third-party actions could read them.
@@ -76,16 +103,16 @@ jobs:
           dir=stage/BepInEx/plugins/NoFussLocks
           mkdir -p "$dir"
           cp NoFussLocks/bin/Release/NoFussLocks.dll LICENSE README.md "$dir/"
-          (cd stage && zip -r -X "../$ZIP" BepInEx)
+          (cd stage && zip -r -X "../$ZIP_FILE" BepInEx)
           # The zip may only contain the mod's own files.
-          unzip -Z1 "$ZIP" | grep -v '/$' | sort > actual.txt
+          unzip -Z1 "$ZIP_FILE" | grep -v '/$' | sort > actual.txt
           printf '%s\n' LICENSE NoFussLocks.dll README.md | sed 's#^#BepInEx/plugins/NoFussLocks/#' | sort > expected.txt
           diff -u expected.txt actual.txt
 
       - name: Attach the zip to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" "$ZIP" --clobber
+        run: gh release upload "$TAG" "$ZIP_FILE" --clobber
 
       - name: Read the release notes
         id: notes
@@ -105,7 +132,7 @@ jobs:
           api_key: ${{ secrets.NEXUSMODS_API_KEY }}
           mod_id: 92
           file_id: ${{ vars.NEXUS_FILE_ID }}
-          filename: ${{ env.ZIP }}
+          filename: ${{ env.ZIP_FILE }}
           version: ${{ env.VERSION }}
           display_name: No-Fuss Locks ${{ env.VERSION }}
           changelog: ${{ steps.notes.outputs.body }}
