@@ -1,0 +1,9 @@
+.agents
+.agents/
+.claude
+.claude/
+bin/
+obj/
+local.props
+dist/
+game-refs/

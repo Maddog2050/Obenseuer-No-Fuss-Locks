@@ -1,0 +1,107 @@
+# Release pipeline.
+#
+# 1. release-please: on every push to main, opens or updates a release PR from the Conventional Commit messages
+#    (feat:, fix:, ...) with the next version and CHANGELOG.md entry. Merging that PR tags the release and creates
+#    the GitHub release.
+# 2. build: when a release was just created, builds the mod against the stripped game references from the private
+#    refs repo, attaches NoFussLocks_<version>.zip to the GitHub release and uploads it to Nexus Mods.
+#
+# Repository settings this needs (Settings -> Secrets and variables -> Actions):
+#   secret   GAME_REFS_TOKEN    read-only token for the private refs repo (fine-grained PAT, Contents: read)
+#   variable GAME_REFS_REPO     the private refs repo, e.g. Maddog2050/Obenseuer-GameRefs
+#   secret   NEXUSMODS_API_KEY  Nexus Mods API key (https://www.nexusmods.com/settings/api-keys)
+#   variable NEXUS_FILE_ID      file ID of the main file on the Nexus page; the Nexus upload is skipped while unset
+# and Settings -> Actions -> General -> "Allow GitHub Actions to create and approve pull requests".
+name: release-please
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@v4
+
+  build:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+      VERSION: ${{ needs.release-please.outputs.version }}
+      ZIP: NoFussLocks_${{ needs.release-please.outputs.version }}.zip
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      # Stripped game/Unity dlls (names and signatures only) and BepInEx; never copied into the build output or zip.
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.GAME_REFS_REPO }}
+          token: ${{ secrets.GAME_REFS_TOKEN }}
+          path: game-refs
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build
+        run: >
+          dotnet build NoFussLocks -c Release -nologo
+          -p:GameDir="$GITHUB_WORKSPACE/game-refs"
+          -p:ManagedDir="$GITHUB_WORKSPACE/game-refs/Managed"
+          -p:BepInExCore="$GITHUB_WORKSPACE/game-refs/BepInEx"
+
+      - name: Package
+        run: |
+          dir=stage/BepInEx/plugins/NoFussLocks
+          mkdir -p "$dir"
+          cp NoFussLocks/bin/Release/NoFussLocks.dll LICENSE README.md "$dir/"
+          (cd stage && zip -r -X "../$ZIP" BepInEx)
+          # The zip may only contain the mod's own files.
+          unzip -Z1 "$ZIP" | grep -v '/$' | sort > actual.txt
+          printf '%s\n' LICENSE NoFussLocks.dll README.md | sed 's#^#BepInEx/plugins/NoFussLocks/#' | sort > expected.txt
+          diff -u expected.txt actual.txt
+
+      - name: Attach the zip to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "$ZIP" --clobber
+
+      - name: Read the release notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo 'body<<EOF_NOTES'
+            gh release view "$TAG" --json body --jq .body
+            echo 'EOF_NOTES'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload to Nexus Mods
+        if: vars.NEXUS_FILE_ID != ''
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.11
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          mod_id: 92
+          file_id: ${{ vars.NEXUS_FILE_ID }}
+          filename: ${{ env.ZIP }}
+          version: ${{ env.VERSION }}
+          display_name: No-Fuss Locks ${{ env.VERSION }}
+          changelog: ${{ steps.notes.outputs.body }}
+          update_mod_version: true
+          archive_existing_version: true

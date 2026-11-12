@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Unity 6 Mono exposes the .NET Standard 2.1 API surface; net6.0+ assemblies don't load there. -->
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>NoFussLocks</AssemblyName>
+    <RootNamespace>NoFussLocks</RootNamespace>
+    <Description>Replaces the lockpicking, safe and keypad minigames with a yes/no prompt that always succeeds.</Description>
+    <Authors>Maddog2050</Authors>
+    <!-- The only place the version is written: Plugin.Version is generated from it (GeneratePluginVersion below).
+         release-please updates it on each release (the x-release-please-version marker); don't edit it by hand. -->
+    <Version>0.1.0</Version> <!-- x-release-please-version -->
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <DebugType>embedded</DebugType>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- dotnet build -p:Deploy=true copies the dll into $(DeployDir). Close the game first. -->
+    <Deploy Condition="'$(Deploy)' == ''">false</Deploy>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Makes private game members visible at compile time (Mono doesn't enforce access checks at run time). -->
+    <PackageReference Include="BepInEx.AssemblyPublicizer.MSBuild" Version="0.4.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="$(BepInExCore)/BepInEx.Core.dll" Private="false" />
+    <Reference Include="$(BepInExCore)/BepInEx.Unity.Mono.dll" Private="false" />
+    <Reference Include="$(BepInExCore)/0Harmony.dll" Private="false" />
+
+    <Reference Include="$(ManagedDir)/Assembly-CSharp.dll" Publicize="true" Private="false" />
+    <Reference Include="$(ManagedDir)/UnityEngine.dll" Private="false" />
+    <Reference Include="$(ManagedDir)/UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="$(ManagedDir)/UnityEngine.IMGUIModule.dll" Private="false" />
+    <Reference Include="$(ManagedDir)/UnityEngine.InputLegacyModule.dll" Private="false" />
+    <Reference Include="$(ManagedDir)/UnityEngine.TextRenderingModule.dll" Private="false" />
+  </ItemGroup>
+
+  <!-- PluginVersion.Value = $(Version), so the BepInEx plugin version can't drift from the assembly version.
+       The Compile item is static (IDEs see it in design-time builds); the target writes the file before compiling. -->
+  <ItemGroup>
+    <Compile Include="$(BaseIntermediateOutputPath)PluginVersion.g.cs" />
+  </ItemGroup>
+  <Target Name="GeneratePluginVersion" BeforeTargets="BeforeCompile;CoreCompile">
+    <WriteLinesToFile File="$(BaseIntermediateOutputPath)PluginVersion.g.cs"
+                      Lines="namespace NoFussLocks { internal static class PluginVersion { public const string Value = &quot;$(Version)&quot;%3B } }"
+                      Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <FileWrites Include="$(BaseIntermediateOutputPath)PluginVersion.g.cs" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="DeployToGame" AfterTargets="Build" Condition="'$(Deploy)' == 'true'">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(DeployDir)" />
+    <Message Importance="high" Text="NoFussLocks -> $(DeployDir)" />
+  </Target>
+
+</Project>
