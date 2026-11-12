@@ -21,7 +21,7 @@ INK, MUTED = '#e2ded0', '#c8c5b8'  # as in-game (PromptUI)
 def rect(x, y, w, h, fill, stroke='none', sw=1, rx=0):
     return f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{fill}" stroke="{stroke}" stroke-width="{sw}" rx="{rx}"/>'
 
-def text(x, y, value, size=20, fill=INK, font='Fira Sans', weight=400, anchor='start', spacing=0):
+def text(x, y, value, size=20, fill=INK, font='Fira Sans Condensed', weight=400, anchor='start', spacing=0):
     return f'<text x="{x}" y="{y}" font-family="{font}" font-size="{size}" font-weight="{weight}" fill="{fill}" text-anchor="{anchor}" letter-spacing="{spacing}">{escape(value)}</text>'
 
 def line(x, y, x2, y2, color, width=1):
@@ -29,9 +29,6 @@ def line(x, y, x2, y2, color, width=1):
 
 def circle(x, y, r, fill='none', stroke='none', sw=1):
     return f'<circle cx="{x}" cy="{y}" r="{r}" fill="{fill}" stroke="{stroke}" stroke-width="{sw}"/>'
-
-def wear(color, count=120):
-    return ''.join(line((i*137+17)%1290, (i*79+13)%372, min(1299,(i*137+17)%1290+8+i%30), (i*79+13)%372, color) for i in range(count))
 
 def label(x, y, value, color):
     return text(x,y,value,14,color,'Liberation Mono',spacing=1.8)
@@ -49,20 +46,13 @@ def button(x,y,label,yes=False):
             +rect(x+3,y+3,w-6,h-6,'none','#d9cda044' if yes else '#6b4a16')
             +game_text(x+w/2,y+27,label,20,anchor='middle'))
 
-def dialog(x,y,scale=1,title='Pick this lock?',content=('Lockpick — Easy.','Anyone who sees you will report a burglary.'),picking=False,angle=0):
-    """Same 540×224 geometry and game palette as build-hybrid.py's option2-game."""
+def dialog(x,y,scale=1,title='Pick this lock?',content=('Lockpick — Easy.','Anyone who sees you will report a burglary.'),angle=0):
+    """A prompt card: the same 540×224 geometry and game palette as prompt-game (build-prompts.py)."""
     s=rect(-5,-5,550,234,'#090b0a','#383b34',2)+rect(0,0,540,224,'#121313','#53564c')+rect(0,0,4,224,'#825112')
-    if picking:
-        s+=game_text(26,44,'Picking the lock...',26)+game_text(26,76,'Keep out of sight.',17,MUTED)
-        s+=rect(26,88,488,14,'#070d0b','#575e4b')+rect(29,91,482*.65,8,'#825112')
-        s+=button(278,140,'Stop')
-        hint='N/ESC)STOP'
-    else:
-        s+=game_text(26,44,title,26)
-        s+=game_text(26,76,content[0],17,MUTED)+game_text(26,99,content[1],17,MUTED)
-        s+=button(26,140,'Yes',True)+button(278,140,'No')
-        hint='Y/Enter)YES   N/ESC)NO'
-    s+=game_text(270,204,hint,16,MUTED,'middle')
+    s+=game_text(26,44,title,26)
+    s+=game_text(26,76,content[0],17,MUTED)+game_text(26,99,content[1],17,MUTED)
+    s+=button(26,140,'Yes',True)+button(278,140,'No')
+    s+=game_text(270,204,'Y/Enter)YES   N/ESC)NO',16,MUTED,'middle')
     return f'<g transform="translate({x} {y}) scale({scale}) rotate({angle} 270 112)" filter="url(#cardshadow)">{s}</g>'
 
 # Card fan placement: scaled up for readability, right edge kept inside the 40 px margin.
@@ -113,17 +103,24 @@ def brand(x,y,size=90):
 def eyebrow(x,y):
     return line(x,y-5,x+30,y-5,'#d4ad5c',4)+text(x+44,y,'FOR OBENSEUER',14,'#acb7a3','DejaVu Sans Mono',spacing=2)
 
+def strap(x,y):
+    # Same type as the hero image's strap line, on one line: Fira Sans Condensed, "One click." bold in the title ochre.
+    return text(x,y,'One click. No minigame.',26,'#cbd3bf','Fira Sans Condensed').replace('>One click.','><tspan fill="#d4ad5c" font-weight="700">One click.</tspan>')
+
 def footer(x,y):return label(x,y,'LOCKS / SAFES / KEYPADS','#95a28b')
 
 def layout():
     s=wall(665)+dial(94,368,153,9,.15)
-    s+=eyebrow(59,75)+brand(53,164,94)+text(59,212,'One click. No minigame.',26,'#bbc6b2')
+    s+=eyebrow(59,75)+brand(53,164,94)+strap(59,212)
     s+=line(60,248,437,248,'#8c9a7d44')+footer(60,286)
     # Open padlock; its whole shackle stays left of the card fan, only the body's right edge is overlapped.
     s+=rich_lock(748,126,1,-9)
     fan=dialog(723,49,.9,title='Crack this safe?',content=('The safe opens without the combination.',''),angle=1.2)
-    fan+=dialog(710,101,.9,title='Bypass this keypad?',content=('The keypad opens without the code.',''),angle=-1.2)
-    fan+=dialog(735,158,.82,angle=.8)
+    # Only the title shows above the front card; the description line would peek through the gap under it.
+    fan+=dialog(710,101,.9,title='Bypass this keypad?',content=('',''),angle=-1.2)
+    # Front card the same scale as the two behind it, so neither peeks out past it, and low enough to leave a gap
+    # under the keypad card's title.
+    fan+=dialog(728,165,.9,angle=.8)
     s+=f'<g transform="translate({FAN_X} {FAN_Y}) scale({FAN_SCALE})">{fan}</g>'
     return s
 
