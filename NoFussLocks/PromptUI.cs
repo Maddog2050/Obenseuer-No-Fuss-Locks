@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace NoFussLocks
@@ -360,6 +361,8 @@ namespace NoFussLocks
         private static State hintState;
         private static bool hintController;
 
+        // Same format as the game's key hints (InventoryNavigationHandler.KeyCodeInfoToString, e.g. the shop's
+        // "F)BUY/SELL   E/Q)CATEGORY   Tab)EXIT"): key, ")", the action in capitals, entries three spaces apart.
         private static string HintText()
         {
             bool controller = UsingController();
@@ -367,15 +370,38 @@ namespace NoFussLocks
             {
                 hintState = state;
                 hintController = controller;
-                var input = InputManager.instance;
-                if (state == State.Picking)
-                    hint = controller ? $"[{input.GetKeyCodeDisplayText("Menu")}] Stop" : "[N / Esc] Stop";
-                else
-                    hint = controller
-                        ? $"[{input.GetKeyCodeDisplayText("Move Item")}] Yes     [{input.GetKeyCodeDisplayText("Menu")}] No"
-                        : "[Y / Enter] Yes     [N / Esc] No";
+                string yes = controller ? BindingText("Move Item") : "Y/Enter";
+                string no = controller ? BindingText("Menu", "Pause Menu") : "N/ESC";
+                hint = state == State.Picking
+                    ? HintEntry(no, "STOP")
+                    : JoinHints(HintEntry(yes, "YES"), HintEntry(no, "NO"));
             }
             return hint;
+        }
+
+        private static string HintEntry(string keys, string action)
+        {
+            return string.IsNullOrEmpty(keys) ? "" : keys + ")" + action;
+        }
+
+        private static string JoinHints(string a, string b)
+        {
+            return a.Length == 0 ? b : b.Length == 0 ? a : a + "   " + b;
+        }
+
+        // The player's current bindings for these actions as the game displays them ("A", "Menu", ...), joined
+        // with "/" and without repeats; empty when none is bound.
+        private static string BindingText(params string[] actions)
+        {
+            var input = InputManager.instance;
+            var shown = new List<KeyCode>();
+            foreach (var action in actions)
+            {
+                var code = input.GetKeyCode(action);
+                if (code != KeyCode.None && !shown.Contains(code))
+                    shown.Add(code);
+            }
+            return string.Join("/", shown.ConvertAll(input.GetKeyCodeDisplayText));
         }
 
         // Y/N/Enter/Esc are safe on keyboard: the game's own key handling is disabled while the prompt is up.
