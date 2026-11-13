@@ -82,9 +82,13 @@ The version is set in one place, `<Version>` in `NoFussLocks/NoFussLocks.csproj`
 - `docs:`, `chore:`, `refactor:` and so on for changes that don't show up in the changelog.
 
 On every push to `main`, a GitHub Action opens or updates a release PR with the next version and changelog entry.
-Merging it tags the release and creates the GitHub release; the same workflow then builds the mod, attaches
-`NoFussLocks_<version>.zip` to the release and uploads it to Nexus Mods
-([.github/workflows/release-please.yml](.github/workflows/release-please.yml) lists the secrets and variables it needs).
+Merging it tags the release and creates the GitHub release as a **draft**. The same workflow then builds the mod from
+that tag, checks the zip, attaches `NoFussLocks_<version>.zip` and only then publishes the release, so a failed build
+leaves an unpublished draft instead of a public release without a download. After that it uploads the same zip to
+Nexus Mods. If the Nexus upload fails, the GitHub release is already public: re-run the failed job, or run the
+workflow by hand with the tag (Actions → release-please → Run workflow), which also finishes a release left as a
+draft. The workflow file explains the recovery options and lists the secrets and variables it needs
+([.github/workflows/release-please.yml](.github/workflows/release-please.yml)).
 
 The build on GitHub uses **stripped** copies of the game's dlls (names and signatures only, every method body
 removed) from a private repository; no game file is ever part of this repository or of a release. After a game
