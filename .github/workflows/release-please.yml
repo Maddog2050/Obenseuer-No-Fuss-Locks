@@ -2,18 +2,32 @@
 #
 # 1. release-please: on every push to main, opens or updates a release PR from the Conventional Commit messages
 #    (feat:, fix:, ...) with the next version and CHANGELOG.md entry. Merging that PR tags the release and creates
-#    the GitHub release.
-# 2. build: when a release was just created, builds the mod against the stripped game references from the private
-#    refs repo, attaches NoFussLocks_<version>.zip to the GitHub release and uploads it to Nexus Mods.
-#    To redo this for an existing release (e.g. after a failed build), run the workflow by hand with its tag.
+#    the GitHub release as a DRAFT (release-please-config.json: draft + force-tag-creation), so nobody sees it yet.
+# 2. build: checks out exactly that tag, checks that the csproj <Version> matches it, builds the mod against the
+#    stripped game references from the private refs repo and packages NoFussLocks_<version>.zip (only the mod's own
+#    files are allowed in it). Runs with read-only repository access.
+# 3. nexus-preflight (only while NEXUS_FILE_ID is set): checks the Nexus API key and IDs before anything is uploaded
+#    anywhere, so a known configuration problem stops the release while it is still a draft.
+# 4. github-release: attaches the zip to the draft, downloads it again to verify it, and only then publishes the
+#    release. A failure anywhere before this point leaves an unpublished draft, never a public release without zip.
+# 5. nexus (only while NEXUS_FILE_ID is set): uploads the zip exactly as published on GitHub to Nexus Mods.
+#    GitHub and Nexus can't be published atomically: if this fails, the GitHub release stays public (with its zip)
+#    and the run fails. Recover by re-running the failed jobs, or by running the workflow by hand with the tag.
+#
+# Running it by hand (Actions -> release-please -> Run workflow) with a tag, e.g. v0.1.0, redoes steps 2-5 for that
+# existing release, using this workflow from the branch you pick (normally main) on the tag's source:
+#   - draft release (e.g. a failed automatic run): the zip is (re)attached and the release published.
+#   - public release: never retagged or unpublished. A missing zip is attached; an existing one is kept (and checked)
+#     unless "replace_asset" is ticked. The Nexus upload is skipped if Nexus already has a version with this number.
+# Without a tag it runs release-please, e.g. to recreate a closed release PR.
 #
 # Repository settings this needs (Settings -> Secrets and variables -> Actions):
 #   secret   GAME_REFS_TOKEN    read-only token for the private refs repo (fine-grained PAT, Contents: read)
 #   variable GAME_REFS_REPO     the private refs repo, e.g. Maddog2050/Obenseuer-GameRefs
 #   secret   NEXUSMODS_API_KEY  Nexus Mods API key (https://www.nexusmods.com/settings/api-keys)
 #   variable NEXUS_FILE_ID      file ID of the main file on the Nexus page; the Nexus upload is skipped while unset
-#   variable NEXUS_MOD_ID       global mod ID for the changelog (Files tab -> Advanced; not the 92 in the page URL);
-#                               the changelog is skipped while unset
+#   variable NEXUS_MOD_ID       global mod ID (Files tab -> Advanced; not the 92 in the page URL), used to check that
+#                               the file belongs to the mod and for the changelog; both are skipped while unset
 # and Settings -> Actions -> General -> "Allow GitHub Actions to create and approve pull requests".
 name: release-please
 
@@ -21,65 +35,151 @@ on:
   push:
     branches:
       - main
-  # Run it by hand (Actions -> release-please -> Run workflow), e.g. to recreate a closed release PR.
   workflow_dispatch:
     inputs:
       tag:
-        description: Build and upload an existing release instead, e.g. v0.1.0 (empty = run release-please)
+        description: Build and publish an existing release instead, e.g. v0.1.0 (empty = run release-please)
         required: false
         type: string
+      replace_asset:
+        description: If that release is already public and has a zip, replace it with a fresh build
+        required: false
+        type: boolean
+        default: false
 
-permissions:
-  contents: write
-  pull-requests: write
+# Every job asks for exactly what it needs.
+permissions: {}
+
+# One release run at a time, so a manual recovery and an automatic release never touch the same release together.
+concurrency:
+  group: release-please
+  cancel-in-progress: false
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     outputs:
       build: ${{ steps.target.outputs.build }}
       tag_name: ${{ steps.target.outputs.tag_name }}
       version: ${{ steps.target.outputs.version }}
+      release_id: ${{ steps.target.outputs.release_id }}
+      sha: ${{ steps.target.outputs.sha }}
     steps:
       - id: release
         if: inputs.tag == ''
         uses: googleapis/release-please-action@v5
 
       # Which release to build: the tag given by hand, else the release release-please just created (if any).
+      # Either way the tag and the release must already exist and belong together; nothing is created here.
       - id: target
         env:
+          GH_TOKEN: ${{ github.token }}
           INPUT_TAG: ${{ inputs.tag }}
           CREATED: ${{ steps.release.outputs.release_created }}
-          TAG: ${{ steps.release.outputs.tag_name }}
-          VERSION: ${{ steps.release.outputs.version }}
+          RP_TAG: ${{ steps.release.outputs.tag_name }}
+          RP_VERSION: ${{ steps.release.outputs.version }}
+          RP_ID: ${{ steps.release.outputs.id }}
+          RP_SHA: ${{ steps.release.outputs.sha }}
         run: |
+          set -euo pipefail
+          repo=$GITHUB_REPOSITORY
+
           if [ -n "$INPUT_TAG" ]; then
             if [[ ! $INPUT_TAG =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
               echo "::error::tag must look like v1.2.3, got '$INPUT_TAG'"
               exit 1
             fi
-            TAG=$INPUT_TAG VERSION=${BASH_REMATCH[1]} CREATED=true
+            tag=$INPUT_TAG version=${BASH_REMATCH[1]}
+            # The release list includes drafts (which have no /releases/tags/ URL yet).
+            ids=$(gh api --paginate "repos/$repo/releases" --jq ".[] | select(.tag_name == \"$tag\") | .id")
+            if [ -z "$ids" ]; then
+              echo "::error::there is no GitHub release for $tag; this only rebuilds existing releases"
+              exit 1
+            fi
+            if [ "$(wc -l <<< "$ids")" -ne 1 ]; then
+              echo "::error::more than one GitHub release uses $tag; delete the stray draft first"
+              exit 1
+            fi
+            id=$ids expected_sha=
+          elif [ "$CREATED" = true ]; then
+            tag=$RP_TAG version=$RP_VERSION id=$RP_ID expected_sha=$RP_SHA
+            if [ "$tag" != "v$version" ] || [ -z "$id" ]; then
+              echo "::error::unexpected release-please output: tag '$tag', version '$version', id '$id'"
+              exit 1
+            fi
+          else
+            echo "No release was created; nothing to build."
+            exit 0
           fi
-          if [ "$CREATED" = true ]; then
-            { echo build=true; echo "tag_name=$TAG"; echo "version=$VERSION"; } >> "$GITHUB_OUTPUT"
+
+          release=$(gh api "repos/$repo/releases/$id")
+          if [ "$(jq -r .tag_name <<< "$release")" != "$tag" ]; then
+            echo "::error::release $id is not for $tag"
+            exit 1
           fi
+          draft=$(jq -r .draft <<< "$release")
+
+          # The commit the tag points at (peeling an annotated tag); fails if the tag doesn't exist.
+          if ! read -r type sha < <(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.type + " " + .object.sha'); then
+            echo "::error::tag $tag does not exist"
+            exit 1
+          fi
+          if [ "$type" = tag ]; then
+            sha=$(gh api "repos/$repo/git/tags/$sha" --jq .object.sha)
+          fi
+          if [ -n "$expected_sha" ] && [ "$sha" != "$expected_sha" ]; then
+            echo "::error::$tag points at $sha, but release-please released $expected_sha"
+            exit 1
+          fi
+
+          if [ -z "$INPUT_TAG" ] && [ "$draft" != true ]; then
+            echo "::warning::release-please published $tag directly instead of as a draft; check \"draft\" in release-please-config.json"
+          fi
+          echo "Building $tag ($sha), release $id, draft: $draft"
+          {
+            echo build=true
+            echo "tag_name=$tag"
+            echo "version=$version"
+            echo "release_id=$id"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     needs: release-please
     if: needs.release-please.outputs.build == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       TAG: ${{ needs.release-please.outputs.tag_name }}
       VERSION: ${{ needs.release-please.outputs.version }}
+      SHA: ${{ needs.release-please.outputs.sha }}
       # Not called ZIP: Info-ZIP's zip reads $ZIP as default arguments, which turned the file name into the archive.
       ZIP_FILE: NoFussLocks_${{ needs.release-please.outputs.version }}.zip
     steps:
-      # persist-credentials: false on both checkouts: no later step needs Git access (gh uses GH_TOKEN), so the
-      # tokens are used for the clone only and not left where the build or third-party actions could read them.
+      # persist-credentials: false on both checkouts: no later step needs Git access, so the tokens are used for the
+      # clone only and not left where the build or third-party actions could read them.
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: refs/tags/${{ needs.release-please.outputs.tag_name }}
           persist-credentials: false
+
+      - name: Check the tagged source
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          if [ "$head" != "$SHA" ]; then
+            echo "::error::checked out $head, but $TAG points at $SHA"
+            exit 1
+          fi
+          versions=$(sed -n 's#.*<Version>\(.*\)</Version>.*#\1#p' NoFussLocks/NoFussLocks.csproj)
+          if [ "$versions" != "$VERSION" ]; then
+            echo "::error::NoFussLocks.csproj at $TAG has <Version> '$versions', expected '$VERSION'"
+            exit 1
+          fi
 
       # Stripped game/Unity dlls (names and signatures only) and BepInEx; never copied into the build output or zip.
       - uses: actions/checkout@v7
@@ -102,33 +202,223 @@ jobs:
 
       - name: Package
         run: |
+          set -euo pipefail
           dir=stage/BepInEx/plugins/NoFussLocks
           mkdir -p "$dir"
           cp NoFussLocks/bin/Release/NoFussLocks.dll LICENSE README.md "$dir/"
           (cd stage && zip -r -X "../$ZIP_FILE" BepInEx)
+          unzip -tq "$ZIP_FILE"
           # The zip may only contain the mod's own files.
           unzip -Z1 "$ZIP_FILE" | grep -v '/$' | sort > actual.txt
           printf '%s\n' LICENSE NoFussLocks.dll README.md | sed 's#^#BepInEx/plugins/NoFussLocks/#' | sort > expected.txt
           diff -u expected.txt actual.txt
 
-      - name: Attach the zip to the GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" "$ZIP_FILE" --clobber
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-zip
+          path: ${{ env.ZIP_FILE }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # Checks the Nexus configuration before anything is uploaded, so a known problem fails while the release is a draft.
+  nexus-preflight:
+    needs: release-please
+    if: needs.release-please.outputs.build == 'true' && vars.NEXUS_FILE_ID != ''
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      NEXUS_API_KEY: ${{ secrets.NEXUSMODS_API_KEY }}
+      NEXUS_FILE_ID: ${{ vars.NEXUS_FILE_ID }}
+      NEXUS_MOD_ID: ${{ vars.NEXUS_MOD_ID }}
+      VERSION: ${{ needs.release-please.outputs.version }}
+    steps:
+      - name: Check the Nexus Mods API key and IDs
+        run: |
+          set -euo pipefail
+          if [ -z "$NEXUS_API_KEY" ]; then
+            echo "::error::NEXUS_FILE_ID is set but the NEXUSMODS_API_KEY secret is missing"
+            exit 1
+          fi
+          for name in NEXUS_FILE_ID NEXUS_MOD_ID; do
+            if [[ -n ${!name} && ! ${!name} =~ ^[A-Za-z0-9_-]+$ ]]; then
+              echo "::error::$name is not a valid ID: '${!name}'"
+              exit 1
+            fi
+          done
+          nexus() { curl -fsS --retry 3 -H "apikey: $NEXUS_API_KEY" -H 'User-Agent: release-workflow' "$1"; }
+
+          if ! nexus https://api.nexusmods.com/v1/users/validate.json > /dev/null; then
+            echo "::error::Nexus Mods rejected NEXUSMODS_API_KEY"
+            exit 1
+          fi
+          if ! file=$(nexus "https://api.nexusmods.com/v3/mod-files/$NEXUS_FILE_ID"); then
+            echo "::error::Nexus Mods has no file $NEXUS_FILE_ID (NEXUS_FILE_ID), or the API key can't see it"
+            exit 1
+          fi
+          echo "Nexus file $NEXUS_FILE_ID: $(jq -r .data.name <<< "$file")"
+          if [ -n "$NEXUS_MOD_ID" ]; then
+            if ! files=$(nexus "https://api.nexusmods.com/v3/mods/$NEXUS_MOD_ID/files"); then
+              echo "::error::Nexus Mods has no mod $NEXUS_MOD_ID (NEXUS_MOD_ID must be the global mod ID, not the one in the page URL)"
+              exit 1
+            fi
+            if ! jq -e --arg id "$NEXUS_FILE_ID" 'any(.data.mod_files[]; .id == $id)' <<< "$files" > /dev/null; then
+              echo "::error::file $NEXUS_FILE_ID (NEXUS_FILE_ID) does not belong to mod $NEXUS_MOD_ID (NEXUS_MOD_ID, the global mod ID)"
+              exit 1
+            fi
+          fi
+          versions=$(nexus "https://api.nexusmods.com/v3/mod-files/$NEXUS_FILE_ID/versions")
+          if jq -e --arg v "$VERSION" 'any(.data.versions[]; .version == $v)' <<< "$versions" > /dev/null; then
+            echo "::notice::Nexus already has version $VERSION of this file; the Nexus upload will be skipped"
+          fi
+
+  # Attaches the zip and only then publishes the release; until here a new release is an invisible draft.
+  github-release:
+    needs: [release-please, build, nexus-preflight]
+    if: >-
+      !cancelled() && needs.build.result == 'success'
+      && (needs.nexus-preflight.result == 'success' || needs.nexus-preflight.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+      RELEASE_ID: ${{ needs.release-please.outputs.release_id }}
+      ZIP_FILE: NoFussLocks_${{ needs.release-please.outputs.version }}.zip
+      REPLACE_ASSET: ${{ inputs.replace_asset == true }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-zip
+          path: dist
+
+      - name: Attach the zip and publish the release
+        run: |
+          set -euo pipefail
+          repo=$GITHUB_REPOSITORY
+          release=$(gh api "repos/$repo/releases/$RELEASE_ID")
+          if [ "$(jq -r .tag_name <<< "$release")" != "$TAG" ]; then
+            echo "::error::release $RELEASE_ID is no longer for $TAG"
+            exit 1
+          fi
+          draft=$(jq -r .draft <<< "$release")
+          asset_id() { gh api "repos/$repo/releases/$RELEASE_ID/assets" --paginate --jq ".[] | select(.name == \"$1\") | .id"; }
+
+          # Leftovers of an upload that failed halfway.
+          for id in $(gh api "repos/$repo/releases/$RELEASE_ID/assets" --paginate \
+                        --jq '.[] | select(.name | test("\\.upload-[0-9]+-[0-9]+\\.zip$")) | .id'); do
+            gh api -X DELETE "repos/$repo/releases/assets/$id"
+          done
+
+          old=$(asset_id "$ZIP_FILE")
+          uploaded=false
+          if [ "$draft" = true ] || [ -z "$old" ] || [ "$REPLACE_ASSET" = true ]; then
+            # Upload under a temporary name first, so a failed upload never removes a zip that is already there.
+            tmp=${ZIP_FILE%.zip}.upload-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.zip
+            new=$(curl -fsS --retry 3 -X POST \
+                    -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+                    -H 'Content-Type: application/zip' --data-binary "@dist/$ZIP_FILE" \
+                    "https://uploads.github.com/repos/$repo/releases/$RELEASE_ID/assets?name=$tmp" | jq -r '.id // empty')
+            if [ -z "$new" ]; then
+              echo "::error::uploading $ZIP_FILE returned no asset"
+              exit 1
+            fi
+            if [ -n "$old" ]; then
+              gh api -X DELETE "repos/$repo/releases/assets/$old"
+            fi
+            gh api -X PATCH "repos/$repo/releases/assets/$new" -f name="$ZIP_FILE" > /dev/null
+            uploaded=true
+          else
+            echo "::notice::$TAG is public and already has $ZIP_FILE; keeping it (run with replace_asset to replace it)"
+          fi
+
+          # Download what is on the release now and check it: the same bytes if just uploaded, the allowed files
+          # either way.
+          id=$(asset_id "$ZIP_FILE")
+          gh api -H 'Accept: application/octet-stream' "repos/$repo/releases/assets/$id" > released.zip
+          if [ "$uploaded" = true ] && ! cmp -s released.zip "dist/$ZIP_FILE"; then
+            echo "::error::the zip on the release differs from the one built"
+            exit 1
+          fi
+          unzip -tq released.zip
+          unzip -Z1 released.zip | grep -v '/$' | sort > actual.txt
+          printf '%s\n' LICENSE NoFussLocks.dll README.md | sed 's#^#BepInEx/plugins/NoFussLocks/#' | sort > expected.txt
+          diff -u expected.txt actual.txt
+
+          others=$(gh api "repos/$repo/releases/$RELEASE_ID/assets" --paginate --jq ".[] | select(.name != \"$ZIP_FILE\") | .name")
+          if [ -n "$others" ]; then
+            echo "::warning::$TAG has other assets as well: $others"
+          fi
+
+          if [ "$draft" = true ]; then
+            # legacy: "Latest" goes by date and version, so finishing an old draft doesn't take it from a newer release.
+            gh api -X PATCH "repos/$repo/releases/$RELEASE_ID" -F draft=false -f make_latest=legacy > /dev/null
+            if [ "$(gh api "repos/$repo/releases/$RELEASE_ID" --jq '.draft, .tag_name' | paste -sd ' ')" != "false $TAG" ]; then
+              echo "::error::publishing $TAG did not take effect"
+              exit 1
+            fi
+            echo "Published $TAG"
+          fi
+
+  # After the GitHub release is public. A failure here leaves GitHub published and Nexus behind: re-run the failed
+  # job, or run the workflow by hand with the tag.
+  nexus:
+    needs: [release-please, github-release]
+    if: >-
+      !cancelled() && needs.github-release.result == 'success' && vars.NEXUS_FILE_ID != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+      RELEASE_ID: ${{ needs.release-please.outputs.release_id }}
+      VERSION: ${{ needs.release-please.outputs.version }}
+      ZIP_FILE: NoFussLocks_${{ needs.release-please.outputs.version }}.zip
+      NEXUS_API_KEY: ${{ secrets.NEXUSMODS_API_KEY }}
+      NEXUS_FILE_ID: ${{ vars.NEXUS_FILE_ID }}
+    steps:
+      # The zip exactly as published on GitHub, so both sites offer the same file.
+      - name: Download the released zip
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "$ZIP_FILE"
+          unzip -Z1 "$ZIP_FILE" | grep -v '/$' | sort > actual.txt
+          printf '%s\n' LICENSE NoFussLocks.dll README.md | sed 's#^#BepInEx/plugins/NoFussLocks/#' | sort > expected.txt
+          diff -u expected.txt actual.txt
+
+      # Nexus has no way to make an upload idempotent; skipping a version number it already has keeps re-runs from
+      # adding the same release twice (and appending the changelog twice). An older version than the newest one on
+      # Nexus (a recovery of an old tag) is skipped too, as it would replace the newer file and mod version.
+      - name: Check whether Nexus already has this version
+        id: nexus
+        run: |
+          set -euo pipefail
+          versions=$(curl -fsS --retry 3 -H "apikey: $NEXUS_API_KEY" -H 'User-Agent: release-workflow' \
+                       "https://api.nexusmods.com/v3/mod-files/$NEXUS_FILE_ID/versions")
+          if jq -e --arg v "$VERSION" 'any(.data.versions[]; .version == $v)' <<< "$versions" > /dev/null; then
+            echo "::notice::Nexus already has version $VERSION of file $NEXUS_FILE_ID; not uploading it again"
+            echo upload=false >> "$GITHUB_OUTPUT"
+          elif newest=$(jq -r '.data.versions[].version' <<< "$versions" | grep -E '^[0-9]+(\.[0-9]+)*$' | sort -V | tail -n 1) &&
+               [ -n "$newest" ] && [ "$(printf '%s\n' "$newest" "$VERSION" | sort -V | tail -n 1)" != "$VERSION" ]; then
+            echo "::warning::Nexus already has the newer version $newest; not uploading $VERSION over it"
+            echo upload=false >> "$GITHUB_OUTPUT"
+          else
+            echo upload=true >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Read the release notes
         id: notes
-        env:
-          GH_TOKEN: ${{ github.token }}
+        if: steps.nexus.outputs.upload == 'true'
         run: |
-          {
-            echo 'body<<EOF_NOTES'
-            gh release view "$TAG" --json body --jq .body
-            echo 'EOF_NOTES'
-          } >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          body=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq .body)
+          # A delimiter that can't appear in the notes.
+          eof=EOF_$(openssl rand -hex 16)
+          { echo "body<<$eof"; echo "$body"; echo "$eof"; } >> "$GITHUB_OUTPUT"
 
       - name: Upload to Nexus Mods
-        if: vars.NEXUS_FILE_ID != ''
+        if: steps.nexus.outputs.upload == 'true'
         uses: Nexus-Mods/upload-action@v1.0.0-beta.11
         with:
           api_key: ${{ secrets.NEXUSMODS_API_KEY }}
