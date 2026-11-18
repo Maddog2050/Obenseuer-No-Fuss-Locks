@@ -426,7 +426,7 @@ jobs:
           file_id: ${{ vars.NEXUS_FILE_ID }}
           filename: ${{ env.ZIP_FILE }}
           version: ${{ env.VERSION }}
-          display_name: No-Fuss Locks ${{ env.VERSION }}
+          display_name: No-Fuss Locks
           changelog: ${{ vars.NEXUS_MOD_ID != '' && steps.notes.outputs.body || '' }}
           update_mod_version: true
           archive_existing_version: true
