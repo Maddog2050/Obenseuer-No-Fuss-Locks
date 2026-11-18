@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/Maddog2050/Obenseuer-No-Fuss-Locks/compare/v0.1.0...v0.1.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* **release:** keep nexus mod name versionless ([fa230a0](https://github.com/Maddog2050/Obenseuer-No-Fuss-Locks/commit/fa230a0ed3ffde02fed386c1b889e86e7736cf89))
+
 ## 0.1.0 (2026-11-12)
 
 
