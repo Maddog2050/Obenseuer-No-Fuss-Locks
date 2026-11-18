@@ -1,0 +1,61 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":configMigration",
+    ":prConcurrentLimitNone",
+    ":prHourlyLimitNone",
+    ":semanticCommits",
+    ":separateMultipleMajorReleases",
+    ":separatePatchReleases",
+    "docker:pinDigests",
+    "mergeConfidence:all-badges"
+  ],
+  "packageRules": [
+    {
+      "description": "Automerge patches",
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "matchCurrentVersion": "!/^0/",
+      "automerge": true
+    },
+    {
+      "description": "Annotations marked depType=no-digest never get a digest",
+      "matchDepTypes": [
+        "no-digest"
+      ],
+      "pinDigests": false
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^.*$/"
+      ],
+      "matchStringsStrategy": "recursive",
+      "matchStrings": [
+        "[^\\s]+\\s+# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersionTemplate=(?<extractVersionTemplate>\\S+))?(?: versioning=(?<versioning>\\S+))?(?: depType=(?<depType>\\S+))?",
+        "(?<currentValue>v?(?<major>0|[1-9]\\d*)\\.(?<minor>[0-9]\\d*)(?:\\.(?<patch>0|[1-9]\\d*))?(?:\\.(?<build>0|[1-9]\\d*))?(?:-(?<prerelease>(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+(?<buildmetadata>[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?)(?:@(?<currentDigest>sha[0-9]+:[0-9a-f]+))?"
+      ],
+      "extractVersionTemplate": "{{#if extractVersionTemplate}}^{{{extractVersionTemplate}}}(?<version>v?\\S+)${{/if}}",
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}",
+      "autoReplaceStringTemplate": "{{{newValue}}}{{#if newDigest}}@{{{newDigest}}}{{/if}}"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^.*$/"
+      ],
+      "matchStringsStrategy": "recursive",
+      "matchStrings": [
+        "[^\\s]+\\s+# renovate-datebased: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersionTemplate=(?<extractVersionTemplate>\\S+))?(?: versioning=(?<versioning>\\S+))?(?: depType=(?<depType>\\S+))?",
+        "(?<currentValue>v?(?<major>\\d{8})(?:-(?<prerelease>(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+(?<buildmetadata>[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?)(?:@(?<currentDigest>sha[0-9]+:[0-9a-f]+))?"
+      ],
+      "extractVersionTemplate": "{{#if extractVersionTemplate}}^{{{extractVersionTemplate}}}(?<version>v?\\S+)${{/if}}",
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}loose{{/if}}",
+      "autoReplaceStringTemplate": "{{{newValue}}}{{#if newDigest}}@{{{newDigest}}}{{/if}}"
+    }
+  ]
+}
