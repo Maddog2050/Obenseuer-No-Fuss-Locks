@@ -1,0 +1,27 @@
+---
+proseWrap: always
+tabWidth: 2
+printWidth: 120
+useTabs: false
+overrides:
+  - files:
+      - "*.md"
+    options:
+      # compatibility with markdownlint
+      proseWrap: always
+      printWidth: 120
+  - files:
+      - "*.yaml"
+      - "*.yml"
+    options:
+      # compatibility with yamllint
+      proseWrap: preserve
+  - files:
+      - "*.jsonc"
+      - "*.json"
+    options:
+      printWidth: 120
+  - files:
+      - "*.jsonc"
+    options:
+      trailingComma: none
