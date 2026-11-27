@@ -70,7 +70,7 @@ jobs:
     steps:
       - id: release
         if: inputs.tag == ''
-        uses: googleapis/release-please-action@v5
+        uses: googleapis/release-please-action@v5.0.0
 
       # Which release to build: the tag given by hand, else the release release-please just created (if any).
       # Either way the tag and the release must already exist and belong together; nothing is created here.
@@ -162,7 +162,7 @@ jobs:
     steps:
       # persist-credentials: false on both checkouts: no later step needs Git access, so the tokens are used for the
       # clone only and not left where the build or third-party actions could read them.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           ref: refs/tags/${{ needs.release-please.outputs.tag_name }}
           persist-credentials: false
@@ -182,14 +182,14 @@ jobs:
           fi
 
       # Stripped game/Unity dlls (names and signatures only) and BepInEx; never copied into the build output or zip.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           repository: ${{ vars.GAME_REFS_REPO }}
           token: ${{ secrets.GAME_REFS_TOKEN }}
           path: game-refs
           persist-credentials: false
 
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@v6.1.0
         with:
           dotnet-version: 8.0.x
 
@@ -213,7 +213,7 @@ jobs:
           printf '%s\n' LICENSE NoFussLocks.dll README.md | sed 's#^#BepInEx/plugins/NoFussLocks/#' | sort > expected.txt
           diff -u expected.txt actual.txt
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: release-zip
           path: ${{ env.ZIP_FILE }}
@@ -287,7 +287,7 @@ jobs:
       ZIP_FILE: NoFussLocks_${{ needs.release-please.outputs.version }}.zip
       REPLACE_ASSET: ${{ inputs.replace_asset == true }}
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: release-zip
           path: dist
