@@ -1,0 +1,13 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>maddog2050/renovate-config:maddog2050-recommended.jsonc#1.0.0"],
+  "packageRules": [
+    {
+      "description": "Automerge patches",
+      "matchUpdateTypes": ["patch"],
+      "matchCurrentVersion": "!/^0/",
+      "automerge": true
+    }
+  ],
+  "customManagers": []
+}
