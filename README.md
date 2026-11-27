@@ -4,34 +4,37 @@ A BepInEx 6 mod for **Obenseuer** that replaces the lockpicking, safe and keypad
 
 Download: [No-Fuss Locks on Nexus Mods](https://www.nexusmods.com/obeseuer/mods/92)
 
-- **Locks** (doors, containers): "Pick this lock?" On Yes you pick the lock for a moment (1 second by default) and it always opens. Witnesses can still see you and report a burglary, just like during the normal minigame.
+- **Locks** (doors, containers): "Pick this lock?" On Yes you pick the lock for a moment (1 second by default) and it
+  always opens. Witnesses can still see you and report a burglary, just like during the normal minigame.
 - **Safes** (combination dials): "Crack this safe?" On Yes the safe opens without entering the combination.
 - **Keypads** (number pads): "Bypass this keypad?" On Yes the keypad opens without entering the code.
 
-For locks you still need a lockpick in your hand for locks, and lockpicks never break (as you never fail). Locks that can't be picked, safes marked "Blocked" and keypads without power behave as in the normal game. Each kind of prompt can be switched off on its own.
+For locks you still need a lockpick in your hand for locks, and lockpicks never break (as you never fail). Locks that
+can't be picked, safes marked "Blocked" and keypads without power behave as in the normal game. Each kind of prompt can
+be switched off on its own.
 
 ## Controls
 
-| | Keyboard and mouse | Controller |
-|---|---|---|
-| Yes | <kbd>Y</kbd> or <kbd>Enter</kbd>, or click the button | the game's "Move Item" button |
-| No / Stop | <kbd>N</kbd> or <kbd>Esc</kbd>, or click the button | the game's "Menu" button |
+|           | Keyboard and mouse                                    | Controller                    |
+| --------- | ----------------------------------------------------- | ----------------------------- |
+| Yes       | <kbd>Y</kbd> or <kbd>Enter</kbd>, or click the button | the game's "Move Item" button |
+| No / Stop | <kbd>N</kbd> or <kbd>Esc</kbd>, or click the button   | the game's "Menu" button      |
 
 ## Settings
 
-The settings file is `BepInEx/config/obenseuer.maddog2050.nofusslocks.cfg`. It is created the first time the game
-runs with the mod. BepInEx reads it when the game starts, so restart the game after editing it (or change the
-settings in-game with a config manager mod).
+The settings file is `BepInEx/config/obenseuer.maddog2050.nofusslocks.cfg`. It is created the first time the game runs
+with the mod. BepInEx reads it when the game starts, so restart the game after editing it (or change the settings
+in-game with a config manager mod).
 
-| Section | Setting | Default | What it does |
-|---|---|---|---|
-| Lockpicking | `Enabled` | `true` | Prompt instead of the lockpicking minigame. Off = the normal minigame. |
-| Lockpicking | `BypassWitnesses` | `false` | On = picking a lock is never seen and never counts as a burglary. |
-| Lockpicking | `PickTime` | `1` | Seconds you stay at the lock after Yes (0–10). Witnesses are checked during this time. 0 = instant, but then you are hardly ever caught. |
-| Lockpicking | `GainSkill` | `true` | A pick raises your Lockpicking skill like a successful minigame. |
-| Lockpicking | `MaxSkillGain` | `0.15` | Most Lockpicking skill one pick can give (0.01–1). The game gives up to 1.0 for very hard locks; since every pick succeeds, it is capped. 1 = no cap. |
-| Safe | `Enabled` | `true` | Prompt instead of the combination dial. |
-| Keypad | `Enabled` | `true` | Prompt instead of the number pad. |
+| Section     | Setting           | Default | What it does                                                                                                                                          |
+| ----------- | ----------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Lockpicking | `Enabled`         | `true`  | Prompt instead of the lockpicking minigame. Off = the normal minigame.                                                                                |
+| Lockpicking | `BypassWitnesses` | `false` | On = picking a lock is never seen and never counts as a burglary.                                                                                     |
+| Lockpicking | `PickTime`        | `1`     | Seconds you stay at the lock after Yes (0–10). Witnesses are checked during this time. 0 = instant, but then you are hardly ever caught.              |
+| Lockpicking | `GainSkill`       | `true`  | A pick raises your Lockpicking skill like a successful minigame.                                                                                      |
+| Lockpicking | `MaxSkillGain`    | `0.15`  | Most Lockpicking skill one pick can give (0.01–1). The game gives up to 1.0 for very hard locks; since every pick succeeds, it is capped. 1 = no cap. |
+| Safe        | `Enabled`         | `true`  | Prompt instead of the combination dial.                                                                                                               |
+| Keypad      | `Enabled`         | `true`  | Prompt instead of the number pad.                                                                                                                     |
 
 ## Requirements
 
@@ -47,16 +50,16 @@ settings in-game with a config manager mod).
 
 To check that it loaded, `BepInEx/LogOutput.log` should contain `No-Fuss Locks <version> loaded`.
 
-**Removing it** is safe: the mod changes no saved game data. Delete the `NoFussLocks` folder (or disable the mod in
-your mod manager) and the minigames are back.
+**Removing it** is safe: the mod changes no saved game data. Delete the `NoFussLocks` folder (or disable the mod in your
+mod manager) and the minigames are back.
 
 ## Building from source
 
-You need the .NET SDK (8 or newer), your own copy of the game and BepInEx 6 for Unity Mono. No game or BepInEx files
-are included in this repository or in the release zip.
+You need the .NET SDK (8 or newer), your own copy of the game and BepInEx 6 for Unity Mono. No game or BepInEx files are
+included in this repository or in the release zip.
 
-1. Copy `local.props.example` to `local.props` and set `GameDir` to your Obenseuer folder. If BepInEx is not inside
-   the game folder (for example when a mod manager keeps it elsewhere), also set `BepInExCore` to its `core` folder.
+1. Copy `local.props.example` to `local.props` and set `GameDir` to your Obenseuer folder. If BepInEx is not inside the
+   game folder (for example when a mod manager keeps it elsewhere), also set `BepInExCore` to its `core` folder.
 2. Build:
 
    ```sh
@@ -64,11 +67,12 @@ are included in this repository or in the release zip.
    ```
 
    The dll is written to `NoFussLocks/bin/Debug/NoFussLocks.dll`.
+
 3. Optional: `dotnet build NoFussLocks -p:Deploy=true` also copies it to `DeployDir` (default
    `<GameDir>/BepInEx/plugins/NoFussLocks`). Close the game first.
 
-The version is set in one place, `<Version>` in `NoFussLocks/NoFussLocks.csproj`, and is managed by release-please
-(see below).
+The version is set in one place, `<Version>` in `NoFussLocks/NoFussLocks.csproj`, and is managed by release-please (see
+below).
 
 ### Releases and changelog
 
@@ -84,26 +88,26 @@ The version is set in one place, `<Version>` in `NoFussLocks/NoFussLocks.csproj`
 On every push to `main`, a GitHub Action opens or updates a release PR with the next version and changelog entry.
 Merging it tags the release and creates the GitHub release as a **draft**. The same workflow then builds the mod from
 that tag, checks the zip, attaches `NoFussLocks_<version>.zip` and only then publishes the release, so a failed build
-leaves an unpublished draft instead of a public release without a download. After that it uploads the same zip to
-Nexus Mods. If the Nexus upload fails, the GitHub release is already public: re-run the failed job, or run the
-workflow by hand with the tag (Actions → release-please → Run workflow), which also finishes a release left as a
-draft. The workflow file explains the recovery options and lists the secrets and variables it needs
+leaves an unpublished draft instead of a public release without a download. After that it uploads the same zip to Nexus
+Mods. If the Nexus upload fails, the GitHub release is already public: re-run the failed job, or run the workflow by
+hand with the tag (Actions → release-please → Run workflow), which also finishes a release left as a draft. The workflow
+file explains the recovery options and lists the secrets and variables it needs
 ([.github/workflows/release-please.yml](.github/workflows/release-please.yml)).
 
-The build on GitHub uses **stripped** copies of the game's dlls (names and signatures only, every method body
-removed) from a private repository; no game file is ever part of this repository or of a release. After a game
-update, refresh them with the `update.sh` script in that repository (its README has the steps), then commit and push
-it. If the mod starts referencing another game or Unity dll, add it to that script's list too.
+The build on GitHub uses **stripped** copies of the game's dlls (names and signatures only, every method body removed)
+from a private repository; no game file is ever part of this repository or of a release. After a game update, refresh
+them with the `update.sh` script in that repository (its README has the steps), then commit and push it. If the mod
+starts referencing another game or Unity dll, add it to that script's list too.
 
 ### Project layout
 
-| File | What it does |
-|---|---|
-| `NoFussLocks/Plugin.cs` | Plugin entry point: settings, patching, unloading. |
-| `NoFussLocks/PromptUI.cs` | The Yes/No prompt: input, the picking phase, witness checks, restoring controls. |
+| File                                      | What it does                                                                                                  |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `NoFussLocks/Plugin.cs`                   | Plugin entry point: settings, patching, unloading.                                                            |
+| `NoFussLocks/PromptUI.cs`                 | The Yes/No prompt: input, the picking phase, witness checks, restoring controls.                              |
 | `NoFussLocks/Patches/LockpickingPatch.cs` | Harmony patch on `PlayerLockpicking.ToggleLockpicking`: shows the prompt instead of the lockpicking minigame. |
-| `NoFussLocks/Patches/KeypadPatch.cs` | Harmony patch on `Keypad.Use`: shows the prompt instead of the safe dial or number pad. |
-| `.github/workflows/release-please.yml` | Changelog, version, release, build and Nexus upload. |
+| `NoFussLocks/Patches/KeypadPatch.cs`      | Harmony patch on `Keypad.Use`: shows the prompt instead of the safe dial or number pad.                       |
+| `.github/workflows/release-please.yml`    | Changelog, version, release, build and Nexus upload.                                                          |
 
 ## How it was made
 
