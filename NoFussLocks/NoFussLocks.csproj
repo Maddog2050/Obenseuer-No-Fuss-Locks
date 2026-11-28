@@ -9,7 +9,7 @@
     <Authors>Maddog2050</Authors>
     <!-- The only place the version is written: Plugin.Version is generated from it (GeneratePluginVersion below).
          release-please updates it on each release (the x-release-please-version marker); don't edit it by hand. -->
-    <Version>0.1.0</Version> <!-- x-release-please-version -->
+    <Version>0.1.1</Version> <!-- x-release-please-version -->
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <DebugType>embedded</DebugType>
